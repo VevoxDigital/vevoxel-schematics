@@ -1,6 +1,6 @@
 name: ${name}
 version: ${version}
-main: ${groupId}.vevoxel.schematics.VevoxelSchematics
+main: ${groupId}.${artifactId}.${name}
 
 load: STARTUP
 

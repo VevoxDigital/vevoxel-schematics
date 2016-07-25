@@ -4,14 +4,18 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>io.vevox</groupId>
-    <artifactId>vevoxel-schematics</artifactId>
+    <groupId>io.vevox.vx</groupId>
+    <artifactId>structures</artifactId>
     <version>0.1.0-rc.1</version>
 
-    <name>Vevoxel Schematics</name>
+    <name>vxStructures</name>
 
-    <description>Improved Schematics Library for Spigot</description>
-    <organization>Vevox Digital</organization>
+    <organization>
+        <name>Vevox Digital</name>
+        <url>http://vevox.io</url>
+    </organization>
+
+    <description>Structure library for Spigot</description>
     <developers>
         <developer>
             <id>CynicalBusiness</id>
