@@ -1,0 +1,9 @@
+name: ${name}
+version: ${version}
+main: ${groupId}.vevoxel.schematics.VevoxelSchematics
+
+load: STARTUP
+
+author: ${organization.name}
+website: ${organization.url}
+description: ${description}
