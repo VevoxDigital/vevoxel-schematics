@@ -1,5 +1,6 @@
 package io.vevox.vx.structures;
 
+import net.minecraft.server.v1_10_R1.BlockState;
 import org.bukkit.plugin.java.JavaPlugin;
 
 /**
