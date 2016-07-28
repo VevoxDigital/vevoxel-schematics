@@ -1,25 +1,30 @@
 package io.vevox.vx.structures;
 
+import com.google.common.base.*;
 import net.minecraft.server.v1_10_R1.*;
+import net.minecraft.server.v1_10_R1.Block;
 import org.apache.commons.lang3.Validate;
 import org.bukkit.*;
+import org.bukkit.block.*;
 import org.bukkit.craftbukkit.v1_10_R1.CraftWorld;
+import org.bukkit.craftbukkit.v1_10_R1.block.CraftBlockState;
+import org.bukkit.inventory.*;
+import org.bukkit.inventory.ItemStack;
 import org.bukkit.util.Vector;
 
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.IOException;
-import java.io.InputStream;
+import java.io.*;
 import java.util.*;
+import java.util.Optional;
 
 /**
  * A "Structure" is any collection of blocks created by the <code>Structure Block</code> or by this plug-in and contains
  * a three-dimensional matrix of blocks than can be saved and loaded as needed.
+ *
  * @author Matthew Struble
  * @since 0.1.0
  */
 @SuppressWarnings("unused WeakerAccess")
-public class Structure {
+public class Structure implements Cloneable {
 
   /**
    * Mirroring of the loading structure.
@@ -64,6 +69,17 @@ public class Structure {
       if (properties.containsKey("west")) properties.put("west", "false");
     }
 
+    Map<IBlockState, Object> stateValueMap(Collection<IBlockState<?>> states) {
+      Map<IBlockState, Object> map = new HashMap<>();
+      states.stream().filter(s -> properties.containsKey(s.a()))
+          .forEach(s -> {
+            @SuppressWarnings("Guava")
+            com.google.common.base.Optional<?> valOpt = s.b(properties.get(s.a()));
+            if (valOpt.isPresent()) map.put(s, valOpt.get());
+          });
+      return map;
+    }
+
     NBTTagCompound toTag() {
       NBTTagCompound compound = new NBTTagCompound();
       compound.setString("name", name);
@@ -86,30 +102,37 @@ public class Structure {
 
   private static class StructureBlockItem {
 
-    BlockPosition pos;
+    Vector pos;
     int state;
 
     StructureBlockItem(NBTTagCompound block) {
       state = block.getInt("state");
 
-      int[] pos = block.getIntArray("pos");
-      this.pos = new BlockPosition(pos[0], pos[1], pos[2]);
+      NBTTagList pos = block.getList("pos", 4);
+      this.pos = new Vector(pos.c(0), pos.c(1), pos.c(2));
     }
 
-    StructureBlockItem(BlockPosition pos, int state) {
+    StructureBlockItem(Vector pos, int state) {
       this.pos = pos;
       this.state = state;
     }
 
+
+
     NBTTagCompound toTag() {
       NBTTagCompound compound = new NBTTagCompound();
       compound.setInt("state", state);
-      compound.setIntArray("pos", new int[]{pos.getX(), pos.getY(), pos.getY()});
+
+      NBTTagList pos = new NBTTagList();
+      pos.add(new NBTTagInt(this.pos.getBlockX()));
+      pos.add(new NBTTagInt(this.pos.getBlockY()));
+      pos.add(new NBTTagInt(this.pos.getBlockZ()));
+      compound.set("pos", pos);
       return compound;
     }
 
-    boolean isAt(BlockPosition pos) {
-      return this.pos.equals(pos);
+    public boolean isAt(Vector vector) {
+      return vector.equals(pos);
     }
 
   }
@@ -143,12 +166,14 @@ public class Structure {
    *
    * @param input The input stream to load from.
    *
-   * @throws IOException General I/O read errors.
+   * @throws IOException              General I/O read errors.
+   * @throws IllegalArgumentException If the input stream is null.
    * @see Structure#Structure(File)
    * @see Structure#Structure(String, int, Location, Vector)
    * @since 0.1.0
    */
-  public Structure(InputStream input) throws IOException {
+  public Structure(InputStream input) throws IOException, IllegalArgumentException {
+    Validate.notNull(input);
     NBTTagCompound compound = NBTCompressedStreamTools.a(input);
 
     author = compound.getString("author");
@@ -209,7 +234,7 @@ public class Structure {
           IBlockData data = world.c(new BlockPosition(x, y, z));
           if (!data.getBlock().getName().equals("minecraft:structure_void")
               && !data.getBlock().getName().equals("minecraft:structure_block"))
-            blocks.add(new StructureBlockItem(new BlockPosition(x, y, z), getStateIndex(new StructurePaletteItem(data))));
+            blocks.add(new StructureBlockItem(new Vector(x, y, z), getStateIndex(new StructurePaletteItem(data))));
         }
   }
 
@@ -225,6 +250,11 @@ public class Structure {
     int index = palette.indexOf(paletteItem);
     if (index < 0) palette.add(paletteItem);
     return index < 0 ? palette.size() - 1 : index;
+  }
+
+  private Optional<StructurePaletteItem> getPaletteAt(Vector vector) {
+    Optional<StructureBlockItem> block = blocks.stream().filter(b -> b.isAt(vector)).findFirst();
+    return block.isPresent() ? Optional.of(palette.get(block.get().state)) : Optional.empty();
   }
 
   /**
@@ -256,12 +286,60 @@ public class Structure {
     return new Structure(author, version > 0 ? version : this.version + 1, size, blocks, palette);
   }
 
-  public void save(File file) throws IOException {
-
+  /**
+   * Saves the structure to disk at the given file. The file should end with the <code>.nbt</code> extension,
+   * but this will not be enforced.
+   *
+   * @param file The file to save to.
+   *
+   * @throws IOException              I/O write errors.
+   * @throws FileNotFoundException    If the file does not exist.
+   * @throws IllegalArgumentException if the file is null.
+   */
+  public void save(File file) throws IOException, IllegalArgumentException {
+    Validate.notNull(file);
+    save(new FileOutputStream(file));
   }
 
-  public void save(Location location, Mirror mirror, Rotation rotation) throws IllegalArgumentException {
+  /**
+   * Saves the structure to the given output stream.
+   * @param out The output stream to save to.
+   * @throws IOException I/O write errors.
+   * @throws IllegalArgumentException If the stream is null.
+   */
+  public void save(OutputStream out) throws IOException, IllegalArgumentException {
+    NBTTagCompound compound = new NBTTagCompound();
+    compound.setString("author", author);
+    compound.setInt("version", version);
 
+    NBTTagList blocks = new NBTTagList();
+    this.blocks.stream().map(StructureBlockItem::toTag).forEach(blocks::add);
+    compound.set("blocks", blocks);
+
+    NBTTagList palette = new NBTTagList();
+    this.palette.stream().map(StructurePaletteItem::toTag).forEach(palette::add);
+    compound.set("palette", palette);
+
+    NBTTagList entities = new NBTTagList();
+    compound.set("entities", entities);
+
+    NBTTagList size = new NBTTagList();
+    size.add(new NBTTagInt(this.size.getBlockX()));
+    size.add(new NBTTagInt(this.size.getBlockY()));
+    size.add(new NBTTagInt(this.size.getBlockZ()));
+
+    NBTCompressedStreamTools.a(compound, out);
+  }
+
+  // TODO Save to world.
+
+  @Override
+  public Structure clone() {
+    try {
+      return (Structure) super.clone();
+    } catch (CloneNotSupportedException e) {
+      return copy(author, version);
+    }
   }
 
 }
