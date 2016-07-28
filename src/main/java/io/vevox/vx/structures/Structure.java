@@ -1,14 +1,12 @@
 package io.vevox.vx.structures;
 
-import com.google.common.base.*;
 import net.minecraft.server.v1_10_R1.*;
 import net.minecraft.server.v1_10_R1.Block;
+import net.minecraft.server.v1_10_R1.BlockState;
 import org.apache.commons.lang3.Validate;
 import org.bukkit.*;
-import org.bukkit.block.*;
 import org.bukkit.craftbukkit.v1_10_R1.CraftWorld;
-import org.bukkit.craftbukkit.v1_10_R1.block.CraftBlockState;
-import org.bukkit.inventory.*;
+import org.bukkit.craftbukkit.v1_10_R1.inventory.CraftItemStack;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.util.Vector;
 
@@ -37,7 +35,24 @@ public class Structure implements Cloneable {
    * Rotation of the loading structure.
    */
   public enum Rotation {
-    R_0, R_90, R_180, R_270
+    R_0, R_90, R_180, R_270;
+
+    int deg() {
+      switch (this) {
+        case R_90:
+          return 90;
+        case R_180:
+          return 180;
+        case R_270:
+          return 270;
+        default:
+          return 0;
+      }
+    }
+
+    double rad() {
+      return Math.toRadians(deg());
+    }
   }
 
   private static class StructurePaletteItem {
@@ -80,6 +95,19 @@ public class Structure implements Cloneable {
       return map;
     }
 
+    @SuppressWarnings("unchecked")
+    IBlockData toData(Block block) {
+      Collection<IBlockState<?>> states = block.t().d();
+      IBlockData data = block.getBlockData();
+
+      // Can't use lambdas as "data" need to be modified.
+      for (Map.Entry<IBlockState, Object> e : stateValueMap(states).entrySet()) {
+        data.set((IBlockState<Comparable>) e.getKey(), (Comparable) e.getValue());
+      }
+
+      return data;
+    }
+
     NBTTagCompound toTag() {
       NBTTagCompound compound = new NBTTagCompound();
       compound.setString("name", name);
@@ -116,7 +144,6 @@ public class Structure implements Cloneable {
       this.pos = pos;
       this.state = state;
     }
-
 
 
     NBTTagCompound toTag() {
@@ -303,8 +330,10 @@ public class Structure implements Cloneable {
 
   /**
    * Saves the structure to the given output stream.
+   *
    * @param out The output stream to save to.
-   * @throws IOException I/O write errors.
+   *
+   * @throws IOException              I/O write errors.
    * @throws IllegalArgumentException If the stream is null.
    */
   public void save(OutputStream out) throws IOException, IllegalArgumentException {
@@ -329,6 +358,113 @@ public class Structure implements Cloneable {
     size.add(new NBTTagInt(this.size.getBlockZ()));
 
     NBTCompressedStreamTools.a(compound, out);
+  }
+
+  /**
+   * Returns a new structure that has been rotated over the given {@link Rotation}.
+   *
+   * @param rotation The rotation to rotate over.
+   *
+   * @return The rotated structure.
+   * @since 0.1.0
+   */
+  public Structure rotated(Rotation rotation) {
+    List<StructureBlockItem> blocks = new ArrayList<>();
+    blocks.addAll(this.blocks);
+    List<StructurePaletteItem> palette = new ArrayList<>();
+    palette.addAll(this.palette);
+
+    double offsetX = size.getX() / 2, offsetZ = size.getZ() / 2;
+    blocks.stream().map(b -> {
+      Vector pos = new Vector(b.pos.getX() - offsetX, b.pos.getY(), b.pos.getZ() - offsetZ);
+      pos = new Vector(
+          (pos.getX() * Math.cos(rotation.rad())) - (pos.getZ() * Math.sin(rotation.rad())),
+          pos.getY(),
+          (pos.getZ() * Math.cos(rotation.rad()) + (pos.getX() * Math.sin(rotation.rad())))
+      );
+      pos = new Vector(pos.getX() + offsetX, pos.getY(), pos.getZ() + offsetZ);
+      return new StructureBlockItem(pos, b.state);
+    });
+
+    return new Structure(author, version, size, blocks, palette);
+  }
+
+  /**
+   * Returns a new structure that has been mirrored over the given {@link Mirror}.
+   *
+   * @param mirror The mirror to mirror over.
+   *
+   * @return The new structure.
+   */
+  public Structure mirrored(Mirror mirror) {
+    List<StructureBlockItem> blocks = new ArrayList<>();
+    blocks.addAll(this.blocks);
+    List<StructurePaletteItem> palette = new ArrayList<>();
+    palette.addAll(this.palette);
+
+    switch (mirror) {
+      case FRONT_BACK:
+        double medianZ = size.getZ() / 2;
+
+        blocks.stream().map(b -> new StructureBlockItem(
+            new Vector(
+                b.pos.getBlockX(), b.pos.getBlockY(),
+                (int) (b.pos.getZ() + ((medianZ - b.pos.getZ()) * 2))),
+            b.state));
+
+        return new Structure(author, version, size, blocks, palette);
+      case LEFT_RIGHT:
+        double medianX = size.getX() / 2;
+
+        blocks.stream().map(b -> new StructureBlockItem(
+            new Vector(
+                (int) (b.pos.getX() + ((medianX - b.pos.getX()) * 2)),
+                b.pos.getBlockY(), b.pos.getBlockZ()),
+            b.state));
+
+        return new Structure(author, version, size, blocks, palette);
+      default:
+        return new Structure(author, version, size, blocks, palette);
+    }
+  }
+
+  /**
+   * Gets an {@link Optional} containing an {@link ItemStack} of size 1 that holds the material
+   * and damage value of the block at the given x, y, and z positions. If no block is present
+   * at the location or the given location is out of bounds, an empty optional is returned.
+   *
+   * @param x The X position.
+   * @param y The Y position.
+   * @param z The Z position.
+   *
+   * @return The optional.
+   * @see #getAt(Vector)
+   * @since 0.1.0
+   */
+  public Optional<ItemStack> getAt(double x, double y, double z) {
+    return getAt(new Vector(x, y, z));
+  }
+
+  /**
+   * Gets an {@link Optional} containing an {@link ItemStack} of size 1 that holds the material
+   * and damage value of the block at the given position. If no block is present
+   * at the location or the given location is out of bounds, an empty optional is returned.
+   *
+   * @param vector The position.
+   *
+   * @return The optional.
+   * @see #getAt(double, double, double)
+   * @since 0.1.0
+   */
+  public Optional<ItemStack> getAt(Vector vector) {
+    Optional<StructurePaletteItem> itemOpt = getPaletteAt(vector);
+    if (!itemOpt.isPresent()) return Optional.empty();
+    StructurePaletteItem item = itemOpt.get();
+
+    Block block = Block.REGISTRY.get(new MinecraftKey(item.name));
+
+    return Optional.of(CraftItemStack.asBukkitCopy(new net.minecraft.server.v1_10_R1.ItemStack(
+        block, 1, block.toLegacyData(item.toData(block)))));
   }
 
   // TODO Save to world.
