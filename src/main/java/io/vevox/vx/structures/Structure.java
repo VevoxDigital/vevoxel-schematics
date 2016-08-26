@@ -1,8 +1,10 @@
 package io.vevox.vx.structures;
 
+import com.google.common.base.*;
+import com.google.common.base.Objects;
 import net.minecraft.server.v1_10_R1.*;
 import net.minecraft.server.v1_10_R1.Block;
-import net.minecraft.server.v1_10_R1.BlockState;
+import net.minecraft.server.v1_10_R1.Chunk;
 import org.apache.commons.lang3.Validate;
 import org.bukkit.*;
 import org.bukkit.craftbukkit.v1_10_R1.CraftWorld;
@@ -61,9 +63,10 @@ public class Structure implements Cloneable {
     String name;
 
     StructurePaletteItem(NBTTagCompound palette) {
-      name = palette.getString("name");
+      name = palette.getString("Name");
       this.properties = new HashMap<>();
-      palette.getCompound("properties").c().forEach(k -> this.properties.put(k, palette.getString(k)));
+      palette.getCompound("Properties").c().forEach(k ->
+          this.properties.put(k, palette.getCompound("Properties").getString(k)));
       updateProperties();
     }
 
@@ -96,13 +99,15 @@ public class Structure implements Cloneable {
     }
 
     @SuppressWarnings("unchecked")
-    IBlockData toData(Block block) {
+    IBlockData toData() {
+      Block block = Block.REGISTRY.get(new MinecraftKey(name));
       Collection<IBlockState<?>> states = block.t().d();
       IBlockData data = block.getBlockData();
 
       // Can't use lambdas as "data" need to be modified.
       for (Map.Entry<IBlockState, Object> e : stateValueMap(states).entrySet()) {
-        data.set((IBlockState<Comparable>) e.getKey(), (Comparable) e.getValue());
+        System.out.println(e.getKey().toString() + ":" + e.getValue());
+        data = data.set(e.getKey(), (Comparable) e.getValue());
       }
 
       return data;
@@ -136,7 +141,7 @@ public class Structure implements Cloneable {
     StructureBlockItem(NBTTagCompound block) {
       state = block.getInt("state");
 
-      NBTTagList pos = block.getList("pos", 4);
+      NBTTagList pos = block.getList("pos", 3);
       this.pos = new Vector(pos.c(0), pos.c(1), pos.c(2));
     }
 
@@ -206,7 +211,7 @@ public class Structure implements Cloneable {
     author = compound.getString("author");
     version = compound.getInt("version");
 
-    NBTTagList size = compound.getList("size", 4);
+    NBTTagList size = compound.getList("size", 3);
     this.size = new Vector(size.c(0), size.c(1), size.c(2));
 
     blocks = new ArrayList<>();
@@ -279,7 +284,10 @@ public class Structure implements Cloneable {
     return index < 0 ? palette.size() - 1 : index;
   }
 
-  private Optional<StructurePaletteItem> getPaletteAt(Vector vector) {
+  private Optional<StructurePaletteItem> getPaletteAt(Vector vector) throws IndexOutOfBoundsException {
+    if (vector.getX() > size.getX() || vector.getY() > size.getY() || vector.getZ() > size.getZ())
+      throw new IndexOutOfBoundsException(String.format("The vector %s is not within the bounds of %s",
+          vector.toString(), size.toString()));
     Optional<StructureBlockItem> block = blocks.stream().filter(b -> b.isAt(vector)).findFirst();
     return block.isPresent() ? Optional.of(palette.get(block.get().state)) : Optional.empty();
   }
@@ -464,10 +472,62 @@ public class Structure implements Cloneable {
     Block block = Block.REGISTRY.get(new MinecraftKey(item.name));
 
     return Optional.of(CraftItemStack.asBukkitCopy(new net.minecraft.server.v1_10_R1.ItemStack(
-        block, 1, block.toLegacyData(item.toData(block)))));
+        block, 1, block.toLegacyData(item.toData()))));
   }
 
-  // TODO Save to world.
+  /**
+   * Loads a given block within the structure to the given location plus the block's relative
+   * offset.
+   *
+   * @param location The location to load the structure to.
+   * @param pos      The relative offset of the block within the structure.
+   *
+   * @throws IndexOutOfBoundsException If the given offset is greater than {@link #size}
+   *                                   on any axis.
+   */
+  @SuppressWarnings("deprecation")
+  public void loadTo(Location location, Vector pos) throws IndexOutOfBoundsException {
+    Optional<StructurePaletteItem> i = getPaletteAt(pos);
+
+    if (!i.isPresent()) return;
+    StructurePaletteItem item = i.get();
+
+    WorldServer world = ((CraftWorld) location.getWorld()).getHandle();
+
+    BlockPosition blockPos = new BlockPosition(
+        location.getBlockX() + pos.getBlockX(),
+        location.getBlockY() + pos.getBlockY(),
+        location.getBlockZ() + pos.getBlockZ()
+    );
+
+    Chunk chunk = world.getChunkAt(blockPos.getX() >> 4, blockPos.getZ() >> 4);
+    chunk.a(blockPos, item.toData());
+    location.getWorld().refreshChunk(chunk.locX, chunk.locZ);
+  }
+
+  /**
+   * Loads the entire structure to the given location.
+   * <p>
+   * <b>Note:</b> The given location should be a minimum for all axises and
+   * all rotations should be applied beforehand.
+   *
+   * @param location The location to load the structure to.
+   */
+  public void loadTo(Location location) {
+    for (int x = 0; x < size.getX(); x++)
+      for (int y = 0; y < size.getY(); y++)
+        for (int z = 0; z < size.getZ(); z++)
+          loadTo(location, new Vector(x, y, z));
+  }
+
+  @Override
+  public String toString() {
+    return Objects.toStringHelper(this)
+        .add("author", author)
+        .add("version", version)
+        .add("size", size)
+        .toString();
+  }
 
   @Override
   public Structure clone() {
